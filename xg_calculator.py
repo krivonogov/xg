@@ -15,6 +15,7 @@ def check_shot_in_pitch(x, y):
         raise ValueError('Point {} is out of the pitch'.format((x, y)))
 
 
+# noinspection PyTypeChecker
 def log_reg_dot(beta_dict, shot_params, verbose=False):
     """
     :param beta_dict: dict with beta coefficients
@@ -163,6 +164,9 @@ class XGCalculator(object):
         cos_angle = (dist_left ** 2 + dist_right ** 2 - self.goal_width ** 2) / (2 * dist_left * dist_right)
         return np.arccos(cos_angle)
 
+    def _is_in_high_values_zone(self, x, y):
+        return y < 5.5 and (30.34 < x < 37.66 or (30.34 - 5.5 < x < 37.66 + 5.5 and self._relative_angle(x, y) > 0.75))
+
 
 class SimpleXGCalculator(XGCalculator):
     """
@@ -216,8 +220,7 @@ class CaleyXGCalculator(XGCalculator):
                     'following_error': 0.67, ('inverse_distance', 'inverse_angle'): -3.2}
         elif direct_free_kick:
             # Shots from Direct Free Kicks
-            # XXX: We use coeff 3.34 for inverse_angle instead of 3.54 to penalize free kicks at sharp angles
-            return {'1': -3.84, 'distance': -0.1, 'inverse_distance': 98.7, 'inverse_angle': 3.34,
+            return {'1': -3.84, 'distance': -0.1, 'inverse_distance': 98.7, 'inverse_angle': 3.54,
                     ('inverse_distance', 'inverse_angle'): -91.1}
         elif cross:
             if header:
@@ -265,24 +268,52 @@ class CaleyXGCalculator(XGCalculator):
         >>> xg.eval(34, 11, big_chance=True, throughball_assist=True, EPL=True, assist_point=(34, 18))
         0.45227739927975757
         >>> xg.eval(37, 20, direct_free_kick=True, LaLiga=True)
-        0.085640339701528026
+        0.10529256313817077
+        >>> xg.eval(34, 11)
+        0.10695610254229779
+        >>> xg.eval(34, 11, assist_point=(37, 25))
+        0.12752188916686916
+        >>> xg.eval(32, 0.1)
+        0.70504634688503887
+        >>> xg.eval(30, 7)
+        0.15264470289986498
+        >>> xg.eval(28.7, 0.1, header=True)
+        0.019590797586891927
+        >>> xg.eval(24.4, 0.5, cross=True)
+        0.027634985220878282
+        >>> xg.eval(2, 2) < 1e-5
+        True
+        >>> xg.eval(42, 1) < 1e-5
+        True
+        >>> xg.eval(2, 1, header=True) < 1e-3
+        True
         """
         check_shot_in_pitch(x, y)
+        if not kwargs.get('dribble_goalkeeper', False) and y < 5.5 and 30.34 < x < 37.66:
+            y = max(0.5, y)
         start_run_point = kwargs.pop('start_run_point', None)
         assist_point = kwargs.pop('assist_point', None)
         verbose = kwargs.pop('verbose', False)
+        cross_or_header = kwargs.get('cross', False) or kwargs.get('header', False)
 
         shot_params = {k: (float(v) if not isinstance(v, tuple) else v) for k, v in kwargs.iteritems()}
-        shot_params['distance'] = self._distance(x, y, self.goal_center, yards=True)
+        if cross_or_header:
+            shot_params['distance'] = self._distance(x, y, self.goal_center, yards=True)
+        else:
+            shot_params['distance'] = y / YARD
+
         shot_params['relative_angle'] = self._relative_angle(x, y)
         shot_params['angle'] = shot_params['relative_angle']
 
         if start_run_point is not None:
-            start_run_x, start_run_y = start_run_point
+            if cross_or_header:
+                start_distance = self._distance(start_run_point[0], start_run_point[1], self.goal_center, yards=True)
+            else:
+                start_distance = start_run_point[1] / YARD
+
+            shot_params['dribble_distance'] = (start_distance - shot_params['distance']) / start_distance
         else:
-            start_run_x, start_run_y = x, y
-        start_distance = self._distance(start_run_x, start_run_y, self.goal_center, yards=True)
-        shot_params['dribble_distance'] = (start_distance - shot_params['distance']) / start_distance
+            shot_params['dribble_distance'] = 0.
 
         if assist_point is not None:
             assist_x, assist_y = assist_point
@@ -296,3 +327,4 @@ class CaleyXGCalculator(XGCalculator):
                                       kwargs.get('cross', False),
                                       kwargs.get('header', False)),
                            shot_params, verbose=verbose)
+
