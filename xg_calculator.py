@@ -3,9 +3,10 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 from scipy.special import expit
 
-from predicteo.utils.math_utils import REG, YARD
-
 __author__ = 'Andrey Krivonogov <krivonogov.andrey@gmail.com>'
+
+YARD = 0.9144
+REG = 10e-7
 
 
 def check_shot_in_pitch(x, y):
